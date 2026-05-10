@@ -1,3 +1,5 @@
+# The God Sensor
+
 ## High-level architecture
 
 ```text
