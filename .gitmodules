@@ -1,0 +1,8 @@
+[submodule "spacecomputer/armory-verifier"]
+	path = spacecomputer/armory-verifier
+	url = git@github.com:guni7/armory-verifier.git
+	branch = proof-of-grass-integration
+[submodule "vendor/gotee_starter"]
+	path = vendor/gotee_starter
+	url = git@github.com:guni7/gotee_starter.git
+	branch = proof-of-grass-applet
