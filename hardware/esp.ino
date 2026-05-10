@@ -1,7 +1,7 @@
 #include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
 #include <PubSubClient.h>
 #include <DHT.h>
-#include <Ed25519.h>
 #include <time.h>
 
 #define DHTPIN D2
@@ -15,39 +15,40 @@ const char* password = "qwertyuiop";
 const char* mqtt_server = "172.20.10.3";
 const int mqtt_port = 1883;
 
+// Local KMS signing proxy. It keeps Orbitport credentials off the ESP8266.
+const char* kms_signer_url = "http://172.20.10.3:3001/sign";
+
 WiFiClient espClient;
 PubSubClient mqtt(espClient);
 DHT dht(DHTPIN, DHTTYPE);
 
 uint32_t nonce = 0;
 
-// -----------------------------------------------------------------------------
-// Ed25519 keypair
-//
-// Private key: 32 bytes
-// Public key:  32 bytes
-//
-// IMPORTANT:
-// This keypair is for demo only. Generate your own later.
-// Do not use this key for real funds.
-// -----------------------------------------------------------------------------
-
-uint8_t privateKey[32] = {
-  0x1f, 0x1e, 0x1d, 0x1c, 0x1b, 0x1a, 0x19, 0x18,
-  0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11, 0x10,
-  0x0f, 0x0e, 0x0d, 0x0c, 0x0b, 0x0a, 0x09, 0x08,
-  0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x00
+struct KmsSignature {
+  bool ok;
+  String signatureScheme;
+  String signerAddress;
+  String signatureHex;
+  String error;
 };
 
-uint8_t publicKey[32];
-
-String bytesToHex(const uint8_t* data, size_t len) {
-  const char hexChars[] = "0123456789abcdef";
+String jsonEscape(const String& value) {
   String out = "";
 
-  for (size_t i = 0; i < len; i++) {
-    out += hexChars[(data[i] >> 4) & 0x0F];
-    out += hexChars[data[i] & 0x0F];
+  for (unsigned int i = 0; i < value.length(); i++) {
+    char c = value.charAt(i);
+    if (c == '"' || c == '\\') {
+      out += '\\';
+      out += c;
+    } else if (c == '\n') {
+      out += "\\n";
+    } else if (c == '\r') {
+      out += "\\r";
+    } else if (c == '\t') {
+      out += "\\t";
+    } else if ((uint8_t)c >= 0x20) {
+      out += c;
+    }
   }
 
   return out;
@@ -77,18 +78,174 @@ String buildCanonicalMessage(
          firmwareHash;
 }
 
-String signEd25519(const String& message) {
-  uint8_t signature[64];
+String buildSigningRequest(
+  const String& deviceId,
+  uint32_t nonce,
+  uint32_t timestamp,
+  int tempX10,
+  int humidityX10,
+  const String& firmwareHash,
+  const String& canonicalMessage
+) {
+  String json = "{";
+  json += "\"device_id\":\"" + jsonEscape(deviceId) + "\",";
+  json += "\"nonce\":" + String(nonce) + ",";
+  json += "\"timestamp\":" + String(timestamp) + ",";
+  json += "\"temperature_c_x10\":" + String(tempX10) + ",";
+  json += "\"humidity_x10\":" + String(humidityX10) + ",";
+  json += "\"firmware_hash\":\"" + jsonEscape(firmwareHash) + "\",";
+  json += "\"canonical_message\":\"" + jsonEscape(canonicalMessage) + "\"";
+  json += "}";
 
-  Ed25519::sign(
-    signature,
-    privateKey,
-    publicKey,
-    message.c_str(),
-    message.length()
+  return json;
+}
+
+String extractJsonString(const String& json, const String& key) {
+  String pattern = "\"" + key + "\"";
+  int keyIndex = json.indexOf(pattern);
+  if (keyIndex < 0) return "";
+
+  int colonIndex = json.indexOf(':', keyIndex + pattern.length());
+  if (colonIndex < 0) return "";
+
+  int startIndex = json.indexOf('"', colonIndex + 1);
+  if (startIndex < 0) return "";
+
+  String out = "";
+  bool escaping = false;
+  for (unsigned int i = startIndex + 1; i < json.length(); i++) {
+    char c = json.charAt(i);
+    if (escaping) {
+      out += c;
+      escaping = false;
+    } else if (c == '\\') {
+      escaping = true;
+    } else if (c == '"') {
+      return out;
+    } else {
+      out += c;
+    }
+  }
+
+  return "";
+}
+
+bool isHexString(const String& value, unsigned int expectedLength) {
+  if (value.length() != expectedLength) return false;
+
+  for (unsigned int i = 0; i < value.length(); i++) {
+    char c = value.charAt(i);
+    bool isHex =
+      (c >= '0' && c <= '9') ||
+      (c >= 'a' && c <= 'f') ||
+      (c >= 'A' && c <= 'F');
+
+    if (!isHex) return false;
+  }
+
+  return true;
+}
+
+bool isEthereumAddress(const String& value) {
+  if (value.length() != 42) return false;
+  if (value.charAt(0) != '0' || value.charAt(1) != 'x') return false;
+
+  for (unsigned int i = 2; i < value.length(); i++) {
+    char c = value.charAt(i);
+    bool isHex =
+      (c >= '0' && c <= '9') ||
+      (c >= 'a' && c <= 'f') ||
+      (c >= 'A' && c <= 'F');
+
+    if (!isHex) return false;
+  }
+
+  return true;
+}
+
+bool isEthereumSignature(const String& value) {
+  return value.length() == 132 &&
+         value.charAt(0) == '0' &&
+         value.charAt(1) == 'x' &&
+         isHexString(value.substring(2), 130);
+}
+
+KmsSignature requestKmsSignature(
+  const String& deviceId,
+  uint32_t nonce,
+  uint32_t timestamp,
+  int tempX10,
+  int humidityX10,
+  const String& firmwareHash,
+  const String& canonicalMessage
+) {
+  KmsSignature result;
+  result.ok = false;
+
+  WiFiClient kmsClient;
+  HTTPClient http;
+
+  if (!http.begin(kmsClient, kms_signer_url)) {
+    result.error = "failed to initialize KMS HTTP client";
+    return result;
+  }
+
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(15000);
+
+  String requestBody = buildSigningRequest(
+    deviceId,
+    nonce,
+    timestamp,
+    tempX10,
+    humidityX10,
+    firmwareHash,
+    canonicalMessage
   );
 
-  return bytesToHex(signature, 64);
+  int statusCode = http.POST(requestBody);
+  String responseBody = http.getString();
+  http.end();
+
+  if (statusCode != 200) {
+    result.error = "KMS signer HTTP " + String(statusCode) + ": " + responseBody;
+    return result;
+  }
+
+  String signerAddress = extractJsonString(responseBody, "signer_address");
+  if (signerAddress == "") {
+    signerAddress = extractJsonString(responseBody, "public_key");
+  }
+
+  String signatureHex = extractJsonString(responseBody, "signature");
+  String scheme = extractJsonString(responseBody, "signature_scheme");
+  String signedCanonical = extractJsonString(responseBody, "canonical_message");
+
+  if (scheme != "ethereum_secp256k1_eip191") {
+    result.error = "KMS signer returned unsupported signature scheme";
+    return result;
+  }
+
+  if (!isEthereumAddress(signerAddress)) {
+    result.error = "KMS signer returned invalid Ethereum signer address";
+    return result;
+  }
+
+  if (!isEthereumSignature(signatureHex)) {
+    result.error = "KMS signer returned invalid Ethereum signature";
+    return result;
+  }
+
+  if (signedCanonical != "" && signedCanonical != canonicalMessage) {
+    result.error = "KMS signer canonical message mismatch";
+    return result;
+  }
+
+  result.ok = true;
+  result.signatureScheme = scheme;
+  result.signerAddress = signerAddress;
+  result.signatureHex = signatureHex;
+  return result;
 }
 
 uint32_t getUnixTimestamp() {
@@ -108,7 +265,8 @@ String buildJsonPayload(
   int tempX10,
   int humidityX10,
   const String& firmwareHash,
-  const String& publicKeyHex,
+  const String& signatureScheme,
+  const String& signerAddress,
   const String& signature,
   const String& localIp
 ) {
@@ -119,8 +277,9 @@ String buildJsonPayload(
   json += "\"temperature_c_x10\":" + String(tempX10) + ",";
   json += "\"humidity_x10\":" + String(humidityX10) + ",";
   json += "\"firmware_hash\":\"" + firmwareHash + "\",";
-  json += "\"signature_scheme\":\"ed25519\",";
-  json += "\"public_key\":\"" + publicKeyHex + "\",";
+  json += "\"signature_scheme\":\"" + signatureScheme + "\",";
+  json += "\"public_key\":\"" + signerAddress + "\",";
+  json += "\"signer_address\":\"" + signerAddress + "\",";
   json += "\"signature\":\"" + signature + "\",";
   json += "\"local_ip\":\"" + localIp + "\"";
   json += "}";
@@ -220,13 +379,10 @@ void setup() {
   delay(3000);
 
   Serial.println();
-  Serial.println("==== ESP8266 DHT22 MQTT ED25519 STARTED ====");
+  Serial.println("==== ESP8266 DHT22 MQTT KMS STARTED ====");
 
   dht.begin();
   Serial.println("DHT22 started");
-
-  // Derive public key from private key once at boot.
-  Ed25519::derivePublicKey(publicKey, privateKey);
 
   Serial.print("Device ID: ");
   Serial.println(getDeviceId());
@@ -234,15 +390,15 @@ void setup() {
   Serial.print("Firmware hash / sketch MD5: ");
   Serial.println(getFirmwareHash());
 
-  Serial.print("Ed25519 public key: ");
-  Serial.println(bytesToHex(publicKey, 32));
+  Serial.print("KMS signer URL: ");
+  Serial.println(kms_signer_url);
 
   connectWifi();
   setupTime();
 
   mqtt.setServer(mqtt_server, mqtt_port);
 
-  // JSON includes 64-byte signature as 128 hex chars, so give MQTT enough room.
+  // JSON includes an Ethereum 65-byte signature and signer address.
   mqtt.setBufferSize(1024);
 }
 
@@ -287,8 +443,6 @@ void loop() {
   String deviceId = getDeviceId();
   String firmwareHash = getFirmwareHash();
   String localIp = WiFi.localIP().toString();
-  String publicKeyHex = bytesToHex(publicKey, 32);
-
   String canonicalMessage = buildCanonicalMessage(
     deviceId,
     nonce,
@@ -299,10 +453,25 @@ void loop() {
   );
 
   Serial.println();
-  Serial.println("Signing message with Ed25519...");
+  Serial.println("Requesting KMS signature...");
   unsigned long signStart = millis();
-  String signature = signEd25519(canonicalMessage);
+  KmsSignature kmsSignature = requestKmsSignature(
+    deviceId,
+    nonce,
+    timestamp,
+    tempX10,
+    humidityX10,
+    firmwareHash,
+    canonicalMessage
+  );
   unsigned long signEnd = millis();
+
+  if (!kmsSignature.ok) {
+    Serial.print("KMS signing failed: ");
+    Serial.println(kmsSignature.error);
+    delay(5000);
+    return;
+  }
 
   String signedPayload = buildJsonPayload(
     deviceId,
@@ -311,8 +480,9 @@ void loop() {
     tempX10,
     humidityX10,
     firmwareHash,
-    publicKeyHex,
-    signature,
+    kmsSignature.signatureScheme,
+    kmsSignature.signerAddress,
+    kmsSignature.signatureHex,
     localIp
   );
 
@@ -338,14 +508,17 @@ void loop() {
   Serial.print("Firmware hash: ");
   Serial.println(firmwareHash);
 
-  Serial.print("Public key: ");
-  Serial.println(publicKeyHex);
+  Serial.print("Signature scheme: ");
+  Serial.println(kmsSignature.signatureScheme);
+
+  Serial.print("Signer identity: ");
+  Serial.println(kmsSignature.signerAddress);
 
   Serial.print("Canonical message: ");
   Serial.println(canonicalMessage);
 
-  Serial.print("Ed25519 signature: ");
-  Serial.println(signature);
+  Serial.print("Signature: ");
+  Serial.println(kmsSignature.signatureHex);
 
   Serial.print("Signing took ms: ");
   Serial.println(signEnd - signStart);
