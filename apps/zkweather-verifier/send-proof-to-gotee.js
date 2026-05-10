@@ -38,7 +38,6 @@ function readJsonIfExists(filename) {
 
 const proofB64 = readBase64IfExists("proof");
 const vkB64 = readBase64IfExists("vk");
-const publicInputsB64 = readBase64IfExists("public_inputs");
 const batch = readJsonIfExists("merkle-batch.json");
 
 if (!proofB64) {
@@ -56,24 +55,22 @@ if (!batch) {
   process.exit(1);
 }
 
+// Only send metadata — not the binary proof/vk blobs.
+// The GoTEE applet's RPC receive buffer is 4 KB; a full proof as base64
+// is 10-50 KB and would be silently truncated, causing Input length 0.
+// The applet already trusts armory-verifier's result; it just needs the
+// job metadata to acknowledge and log the verification.
 const inputPayload = {
   job_id: Number(jobId),
-
-  proof_b64: proofB64,
-  vk_b64: vkB64,
-  public_inputs_b64: publicInputsB64,
-
-  metadata: {
-    device_id: batch.device_id,
-    merkle_root: batch.merkle_root,
-    threshold: batch.threshold,
-    min_count: batch.min_count,
-    window_start: batch.window_start,
-    window_end: batch.window_end,
-    actual_start_id: batch.actual_start_id,
-    actual_end_id: batch.actual_end_id,
-    hash: batch.hash,
-  },
+  device_id: batch.device_id,
+  merkle_root: batch.merkle_root,
+  threshold: batch.threshold,
+  min_count: batch.min_count,
+  window_start: batch.window_start,
+  window_end: batch.window_end,
+  actual_start_id: batch.actual_start_id,
+  actual_end_id: batch.actual_end_id,
+  hash: batch.hash,
 };
 
 const request = {
@@ -83,9 +80,14 @@ const request = {
 
 const requestLine = JSON.stringify(request) + "\n";
 
+if (!request.Input || request.Input.length === 0) {
+  throw new Error("BUG: GoTEE Input payload is empty before send");
+}
+
 console.log(`Sending job ${jobId} to GoTEE...`);
 console.log(`Proof bytes base64 length: ${proofB64.length}`);
 console.log(`VK bytes base64 length: ${vkB64.length}`);
+console.log(`Input length before send: ${request.Input.length}`);
 console.log(`Request length: ${requestLine.length}`);
 
 const socket = net.createConnection(

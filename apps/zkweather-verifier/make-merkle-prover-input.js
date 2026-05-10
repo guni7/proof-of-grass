@@ -53,16 +53,11 @@ function normalizeNoirReturn(value) {
 }
 
 async function loadPoseidonHelper() {
-  const circuitPath = path.join(
-    "..",
-    "zkweather_poseidon_helper",
-    "target",
-    "zkweather_poseidon_helper.json"
-  );
+  const circuitPath = path.join(__dirname, "..", "..", "circuits", "zkweather_poseidon_helper", "target", "zkweather_poseidon_helper.json");
 
   if (!fs.existsSync(circuitPath)) {
     throw new Error(
-      `Poseidon helper circuit not found at ${circuitPath}. Run: cd ../zkweather_poseidon_helper && nargo compile`
+      `Poseidon helper circuit not found at ${circuitPath}. Run: cd ../../circuits/zkweather_poseidon_helper && nargo compile`
     );
   }
 
@@ -306,7 +301,7 @@ window_end = ${windowEnd}
   fs.writeFileSync("merkle-batch.json", JSON.stringify(batchMetadata, null, 2));
 
   fs.writeFileSync(
-    path.join("..", "zkweather_threshold", "Prover.toml"),
+    path.join(__dirname, "..", "..", "circuits", "zkweather_threshold", "Prover.toml"),
     proverToml
   );
 
@@ -321,7 +316,7 @@ window_end = ${windowEnd}
   }
 
   console.log("\nWrote merkle-batch.json");
-  console.log("Wrote ../zkweather_threshold/Prover.toml");
+  console.log("Wrote ../../circuits/zkweather_threshold/Prover.toml");
 }
 
 main().catch((err) => {

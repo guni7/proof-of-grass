@@ -81,7 +81,7 @@ fs.writeFileSync(
 );
 
 fs.writeFileSync(
-  path.join("..", "zkweather_threshold", "Prover.toml"),
+  path.join(__dirname, "..", "..", "circuits", "zkweather_threshold", "Prover.toml"),
   proverToml
 );
 
@@ -95,6 +95,6 @@ for (const r of ordered) {
 console.log();
 console.log("Batch hash:", batchHash);
 console.log("Wrote batch.json");
-console.log("Wrote ../zkweather_threshold/Prover.toml");
+console.log("Wrote ../../circuits/zkweather_threshold/Prover.toml");
 console.log();
 console.log(proverToml);

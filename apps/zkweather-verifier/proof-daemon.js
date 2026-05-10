@@ -18,10 +18,11 @@ const MIN_COUNT = 3;
 const POLL_INTERVAL_MS = 5000;
 
 const VERIFIER_DIR = process.cwd();
-const CIRCUIT_DIR = path.join(VERIFIER_DIR, "..", "zkweather_threshold");
+const ROOT_DIR = path.resolve(__dirname, "..", "..");
+const CIRCUIT_DIR = path.join(ROOT_DIR, "circuits", "zkweather_threshold");
 const PROOFS_DIR = path.join(VERIFIER_DIR, "proofs");
 
-const ARMORY_VERIFIER_DIR = path.join(VERIFIER_DIR, "..", "armory-verifier");
+const ARMORY_VERIFIER_DIR = path.join(ROOT_DIR, "spacecomputer", "armory-verifier");
 const ARMORY_VERIFIER_BIN = path.join(
   ARMORY_VERIFIER_DIR,
   "target",
@@ -413,7 +414,7 @@ function verifyWithArmoryDocker(jobId) {
 function verifyWithArmoryNative(archived) {
   if (!fs.existsSync(ARMORY_VERIFIER_BIN)) {
     throw new Error(
-      `Missing armory-verifier binary at ${ARMORY_VERIFIER_BIN}. Run: cd ../armory-verifier && cargo build --release`
+      `Missing armory-verifier binary at ${ARMORY_VERIFIER_BIN}. Run: cd ../../spacecomputer/armory-verifier && cargo build --release`
     );
   }
 
