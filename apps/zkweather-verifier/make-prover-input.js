@@ -1,8 +1,8 @@
 const fs = require("fs");
-const path = require("path");
 const Database = require("better-sqlite3");
+const { DB_PATH, THRESHOLD_PROVER_TOML } = require("./zkweather-paths");
 
-const db = new Database("zkweather.db");
+const db = new Database(DB_PATH);
 
 const DEVICE_ID = "esp8266-daaa2c";
 const WINDOW_SIZE = 5;
@@ -32,13 +32,8 @@ threshold = ${THRESHOLD}
 min_count = ${MIN_COUNT}
 `;
 
-const outPath = path.join(
-  "..",
-  "zkweather_threshold",
-  "Prover.toml"
-);
-
-fs.writeFileSync(outPath, toml);
+fs.writeFileSync(THRESHOLD_PROVER_TOML, toml);
 
 console.log("Wrote Noir Prover.toml:");
+console.log(THRESHOLD_PROVER_TOML);
 console.log(toml);

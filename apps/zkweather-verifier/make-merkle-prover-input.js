@@ -1,10 +1,18 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { execFileSync } = require("child_process");
 const Database = require("better-sqlite3");
 const { Noir } = require("@noir-lang/noir_js");
+const {
+  DB_PATH,
+  POSEIDON_HELPER_ARTIFACT,
+  POSEIDON_HELPER_DIR,
+  THRESHOLD_PROVER_TOML,
+  VERIFIER_DIR,
+} = require("./zkweather-paths");
 
-const db = new Database("zkweather.db");
+const db = new Database(DB_PATH);
 
 const DEVICE_ID = process.env.DEVICE_ID || "esp8266-daaa2c";
 
@@ -53,20 +61,42 @@ function normalizeNoirReturn(value) {
 }
 
 async function loadPoseidonHelper() {
-  const circuitPath = path.join(
-    "..",
-    "zkweather_poseidon_helper",
-    "target",
-    "zkweather_poseidon_helper.json"
-  );
+  if (!fs.existsSync(POSEIDON_HELPER_ARTIFACT)) {
+    if (!fs.existsSync(POSEIDON_HELPER_DIR)) {
+      throw new Error(`Poseidon helper circuit directory not found at ${POSEIDON_HELPER_DIR}`);
+    }
 
-  if (!fs.existsSync(circuitPath)) {
+    if (process.env.ZKWEATHER_AUTO_COMPILE_POSEIDON === "0") {
+      throw new Error(
+        `Poseidon helper circuit not found at ${POSEIDON_HELPER_ARTIFACT}. Run: cd ${POSEIDON_HELPER_DIR} && nargo compile`
+      );
+    }
+
+    console.log(`Poseidon helper artifact missing, compiling ${POSEIDON_HELPER_DIR}`);
+
+    try {
+      execFileSync("nargo", ["compile"], {
+        cwd: POSEIDON_HELPER_DIR,
+        stdio: "inherit",
+      });
+    } catch (err) {
+      const installHint =
+        err.code === "ENOENT"
+          ? "nargo is not installed or not on PATH. "
+          : "";
+      throw new Error(
+        `${installHint}Poseidon helper circuit not found at ${POSEIDON_HELPER_ARTIFACT}. Run: cd ${POSEIDON_HELPER_DIR} && nargo compile`
+      );
+    }
+  }
+
+  if (!fs.existsSync(POSEIDON_HELPER_ARTIFACT)) {
     throw new Error(
-      `Poseidon helper circuit not found at ${circuitPath}. Run: cd ../zkweather_poseidon_helper && nargo compile`
+      `nargo compile completed but did not write ${POSEIDON_HELPER_ARTIFACT}`
     );
   }
 
-  const circuit = JSON.parse(fs.readFileSync(circuitPath, "utf8"));
+  const circuit = JSON.parse(fs.readFileSync(POSEIDON_HELPER_ARTIFACT, "utf8"));
   return new Noir(circuit);
 }
 
@@ -303,12 +333,12 @@ window_end = ${windowEnd}
     levels: levels.map((level) => level.map((x) => x.toString())),
   };
 
-  fs.writeFileSync("merkle-batch.json", JSON.stringify(batchMetadata, null, 2));
-
   fs.writeFileSync(
-    path.join("..", "zkweather_threshold", "Prover.toml"),
-    proverToml
+    path.join(VERIFIER_DIR, "merkle-batch.json"),
+    JSON.stringify(batchMetadata, null, 2)
   );
+
+  fs.writeFileSync(THRESHOLD_PROVER_TOML, proverToml);
 
   console.log("Noir Poseidon Merkle root:", merkleRoot.toString());
   console.log("Selected readings:");
@@ -320,8 +350,8 @@ window_end = ${windowEnd}
     );
   }
 
-  console.log("\nWrote merkle-batch.json");
-  console.log("Wrote ../zkweather_threshold/Prover.toml");
+  console.log(`\nWrote ${path.join(VERIFIER_DIR, "merkle-batch.json")}`);
+  console.log(`Wrote ${THRESHOLD_PROVER_TOML}`);
 }
 
 main().catch((err) => {

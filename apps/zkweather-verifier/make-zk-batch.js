@@ -2,8 +2,13 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const Database = require("better-sqlite3");
+const {
+  DB_PATH,
+  THRESHOLD_PROVER_TOML,
+  VERIFIER_DIR,
+} = require("./zkweather-paths");
 
-const db = new Database("zkweather.db");
+const db = new Database(DB_PATH);
 
 const DEVICE_ID = "esp8266-daaa2c";
 const WINDOW_SIZE = 5;
@@ -76,14 +81,11 @@ const batchMetadata = {
 };
 
 fs.writeFileSync(
-  path.join("batch.json"),
+  path.join(VERIFIER_DIR, "batch.json"),
   JSON.stringify(batchMetadata, null, 2)
 );
 
-fs.writeFileSync(
-  path.join("..", "zkweather_threshold", "Prover.toml"),
-  proverToml
-);
+fs.writeFileSync(THRESHOLD_PROVER_TOML, proverToml);
 
 console.log("Selected readings:");
 for (const r of ordered) {
@@ -94,7 +96,7 @@ for (const r of ordered) {
 
 console.log();
 console.log("Batch hash:", batchHash);
-console.log("Wrote batch.json");
-console.log("Wrote ../zkweather_threshold/Prover.toml");
+console.log(`Wrote ${path.join(VERIFIER_DIR, "batch.json")}`);
+console.log(`Wrote ${THRESHOLD_PROVER_TOML}`);
 console.log();
 console.log(proverToml);

@@ -2,8 +2,13 @@ const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
 const Database = require("better-sqlite3");
+const {
+  DB_PATH,
+  THRESHOLD_CIRCUIT_DIR,
+  VERIFIER_DIR,
+} = require("./zkweather-paths");
 
-const db = new Database("zkweather.db");
+const db = new Database(DB_PATH);
 
 const DEVICE_ID = "esp8266-daaa2c";
 
@@ -17,8 +22,7 @@ const MIN_COUNT = 3;
 
 const POLL_INTERVAL_MS = 5000;
 
-const VERIFIER_DIR = process.cwd();
-const CIRCUIT_DIR = path.join(VERIFIER_DIR, "..", "zkweather_threshold");
+const CIRCUIT_DIR = THRESHOLD_CIRCUIT_DIR;
 const PROOFS_DIR = path.join(VERIFIER_DIR, "proofs");
 
 const ARMORY_VERIFIER_DIR = path.join(VERIFIER_DIR, "..", "armory-verifier");
