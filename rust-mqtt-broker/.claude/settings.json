@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo run *)",
+      "Bash(lsof -iTCP:1883 -sTCP:LISTEN)",
+      "Bash(pkill -f rust-mqtt-broker)"
+    ]
+  }
+}
