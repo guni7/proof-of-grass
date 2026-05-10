@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GodEye | ZK-Oracle Dashboard</title>
+    <link rel="stylesheet" href="index.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="glass-container">
+        <header>
+            <div class="logo">
+                <span class="icon">👁️</span>
+                <h1>GodEye <span class="badge">Sepolia</span></h1>
+            </div>
+            <div class="wallet-status">
+                <span class="status-dot"></span>
+                <span id="wallet-address">Not Connected</span>
+            </div>
+        </header>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <label>Total Rewards</label>
+                <div class="value"><span id="total-rewards">0.00</span> <span class="unit">SIGNAL</span></div>
+                <div class="trend positive">+10 SIGNAL / batch</div>
+            </div>
+            <div class="stat-card">
+                <label>Active Devices</label>
+                <div class="value" id="device-count">1</div>
+                <div class="subtext">ens: sensor-alpha.godeye.eth</div>
+            </div>
+            <div class="stat-card">
+                <label>Last Proof</label>
+                <div class="value status-ok">Verified</div>
+                <div class="subtext">Settled on-chain (Block: 5,423,122)</div>
+            </div>
+        </div>
+
+        <section class="proof-feed">
+            <h2>Live Verification Stream</h2>
+            <div class="feed-container" id="proof-feed">
+                <!-- Proofs will be injected here -->
+                <div class="feed-item">
+                    <div class="item-header">
+                        <span class="batch-id">Batch #4221</span>
+                        <span class="timestamp">Just now</span>
+                    </div>
+                    <div class="item-content">
+                        <p>ZK-Proof generated for device <code>0x8fD...ea5</code></p>
+                        <div class="swarm-link">Artifacts on Swarm: <code>bzz://a6f2...9d3</code></div>
+                    </div>
+                    <div class="item-footer">
+                        <span class="status-badge settled">On-Chain Settled</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script src="https://cdn.ethers.io/lib/ethers-5.2.umd.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

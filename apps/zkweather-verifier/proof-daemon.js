@@ -603,6 +603,9 @@ async function generateProofForNextWindow() {
     sendProofToGotee(jobId);
 
     console.log(`✅ Proof job ${jobId} completed, ARM-verified, native-verified, and sent to GoTEE`);
+    console.log(`📡 [GodEye] Proof verified. Settling SIGNAL rewards on-chain...`);
+    const tx = await manager.submitProof(jobId, merkleRoot);
+    console.log(`✅ [GodEye] Settled! TX: ${tx.hash}`);
     console.log(`Proof saved at: ${archived.proofPath}`);
     console.log(`VK saved at: ${archived.vkPath}`);
     console.log(`VK hash saved at: ${archived.vkHashPath}`);

@@ -6,3 +6,9 @@
 	path = spacecomputer/gotee_starter
 	url = git@github.com:guni7/gotee_starter.git
 	branch = proof-of-grass-applet
+[submodule "contracts/lib/forge-std"]
+	path = contracts/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "contracts/lib/openzeppelin-contracts"]
+	path = contracts/lib/openzeppelin-contracts
+	url = https://github.com/openzeppelin/openzeppelin-contracts
