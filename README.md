@@ -35,3 +35,12 @@ GoTEE Applet
   | receives verified result / secure handoff
   v
 Optional smart contract / reward trigger
+
+
+
+
+
+apps/           application/backend code --> drives the program - fetch from sensors, verify signature, merkle root + proof of inclusion
+circuits/       Noir circuits 
+spacecomputer/  armory verifier / GoTEE dependencies
+scripts/        helper scripts
