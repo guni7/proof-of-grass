@@ -1,9 +1,12 @@
 {
   "name": "zkweather-verifier",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "verifier.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node verifier.js",
+    "kms:create-key": "node kms-create-key.js",
+    "kms:signer": "node kms-signer.js",
+    "test": "node test-kms-signer.js"
   },
   "keywords": [],
   "author": "",

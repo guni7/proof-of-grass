@@ -3,19 +3,42 @@ const Database = require("better-sqlite3");
 const crypto = require("crypto");
 
 // Your MQTT broker
-const MQTT_URL = "mqtt://172.20.10.3:1883";
-const MQTT_TOPIC = "weather/dht22/signed";
+const MQTT_URL = process.env.MQTT_URL || "mqtt://172.20.10.3:1883";
+const MQTT_TOPIC = process.env.MQTT_TOPIC || "weather/dht22/signed";
+
+function parseCsv(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
 // Register your real ESP8266 here.
 // Do NOT trust public_key from incoming payload blindly.
+const DEFAULT_DEVICE_ID = "esp8266-daaa2c";
+const DEFAULT_PUBLIC_KEY =
+  "712651f450ba05b63898b99ef5f7ba45632e8e2527f7f715cd671ec4024cc51e";
+const DEFAULT_APPROVED_FIRMWARE_HASHES = [
+  "7229c744050eabd1f968457de01911ee",
+  "f7b62a2847d61cbbdf0cdd73bc0d15ac",
+];
+
+const registeredDeviceId = process.env.ZKWEATHER_DEVICE_ID || DEFAULT_DEVICE_ID;
+const registeredPublicKey = (
+  process.env.ZKWEATHER_PUBLIC_KEY || DEFAULT_PUBLIC_KEY
+).toLowerCase();
+const approvedFirmwareHashes = parseCsv(
+  process.env.ZKWEATHER_APPROVED_FIRMWARE_HASHES
+);
+
 const REGISTERED_DEVICES = {
-  "esp8266-daaa2c": {
-    publicKey:
-      "712651f450ba05b63898b99ef5f7ba45632e8e2527f7f715cd671ec4024cc51e",
-    approvedFirmwareHashes: new Set([
-      "7229c744050eabd1f968457de01911ee",
-      "f7b62a2847d61cbbdf0cdd73bc0d15ac"
-    ]),
+  [registeredDeviceId]: {
+    publicKey: registeredPublicKey,
+    approvedFirmwareHashes: new Set(
+      approvedFirmwareHashes.length
+        ? approvedFirmwareHashes
+        : DEFAULT_APPROVED_FIRMWARE_HASHES
+    ),
   },
 };
 
@@ -162,11 +185,11 @@ function validateReadingShape(reading) {
     };
   }
 
-  if (reading.public_key.length !== 64) {
+  if (!/^[0-9a-fA-F]{64}$/.test(reading.public_key)) {
     return { ok: false, reason: "public_key must be 32 bytes hex" };
   }
 
-  if (reading.signature.length !== 128) {
+  if (!/^[0-9a-fA-F]{128}$/.test(reading.signature)) {
     return { ok: false, reason: "signature must be 64 bytes hex" };
   }
 
@@ -203,7 +226,7 @@ async function verifyReading(reading) {
     return { ok: false, reason: `Unknown device_id: ${reading.device_id}` };
   }
 
-  if (reading.public_key !== registered.publicKey) {
+  if (reading.public_key.toLowerCase() !== registered.publicKey) {
     return {
       ok: false,
       reason: "Payload public_key does not match registered public key",
