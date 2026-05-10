@@ -6,6 +6,8 @@
     "start": "node verifier.js",
     "kms:create-key": "node kms-create-key.js",
     "kms:signer": "node kms-signer.js",
+    "e2e:kms": "node kms-signer-e2e.js",
+    "e2e:mqtt": "node local-mqtt-e2e.js",
     "test": "node test-kms-signer.js"
   },
   "keywords": [],
@@ -13,10 +15,10 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@noble/ed25519": "^3.1.0",
     "@noir-lang/noir_js": "^1.0.0-beta.21",
     "better-sqlite3": "^12.9.0",
     "circomlibjs": "^0.1.7",
+    "ethers": "^5.8.0",
     "ffjavascript": "^0.3.1",
     "mqtt": "^5.15.1"
   }

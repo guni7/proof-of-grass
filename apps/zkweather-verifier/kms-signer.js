@@ -1,9 +1,9 @@
 const http = require("http");
 const {
   loadDotEnv,
-  normalizePublicKey,
+  normalizeEthereumAddress,
   readConfig,
-  signEd25519Raw,
+  signCanonicalMessage,
 } = require("./orbitport-kms");
 
 function parseCsv(value) {
@@ -164,7 +164,7 @@ function getSignerOptions(env = process.env) {
 }
 
 function createServer(config, options) {
-  const publicKeyHex = normalizePublicKey(config.publicKey);
+  const signerAddress = normalizeEthereumAddress(config.signerAddress);
 
   return http.createServer(async (req, res) => {
     try {
@@ -172,7 +172,10 @@ function createServer(config, options) {
         sendJson(res, 200, {
           ok: true,
           key_configured: Boolean(config.keyId),
-          public_key: publicKeyHex,
+          signer_mode: "orbitport-kms",
+          signature_scheme: "ethereum_secp256k1_eip191",
+          public_key: signerAddress,
+          signer_address: signerAddress,
         });
         return;
       }
@@ -189,12 +192,13 @@ function createServer(config, options) {
         return;
       }
 
-      const signature = await signEd25519Raw(config, validation.canonicalMessage);
+      const signature = await signCanonicalMessage(config, validation.canonicalMessage);
       sendJson(res, 200, {
         ok: true,
-        signature_scheme: "ed25519",
-        public_key: signature.publicKeyHex,
-        signature: signature.signatureHex,
+        signature_scheme: signature.signatureScheme,
+        public_key: signature.signerAddress,
+        signer_address: signature.signerAddress,
+        signature: signature.signature,
         key_id: signature.keyId,
         canonical_message: validation.canonicalMessage,
       });
@@ -213,9 +217,9 @@ async function main() {
   const host = process.env.ZKWEATHER_KMS_SIGNER_HOST || "0.0.0.0";
 
   if (!config.keyId) {
-    throw new Error("Missing ZKWEATHER_KMS_KEY_ID or SPACEFABRIC_KMS_KEY_REF");
+    throw new Error("Missing ZKWEATHER_ETHEREUM_KMS_KEY_ID");
   }
-  normalizePublicKey(config.publicKey);
+  normalizeEthereumAddress(config.signerAddress);
 
   const server = createServer(config, options);
   server.listen(port, host, () => {

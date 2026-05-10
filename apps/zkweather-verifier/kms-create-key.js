@@ -1,7 +1,7 @@
 const {
-  createEd25519Key,
+  createEthereumKey,
   loadDotEnv,
-  normalizePublicKey,
+  normalizeEthereumAddress,
   readConfig,
 } = require("./orbitport-kms");
 
@@ -12,15 +12,15 @@ async function main() {
   const alias =
     process.argv[2] ||
     process.env.ZKWEATHER_KMS_KEY_ALIAS ||
-    `zkweather-${Date.now()}`;
+    `zkweather-esp8266-eth-${Date.now()}`;
 
-  const result = await createEd25519Key(config, alias);
+  const result = await createEthereumKey(config, alias);
   const metadata = result.KeyMetadata || {};
   const keyId = metadata.KeyId;
-  const publicKey = metadata.PublicKey ? normalizePublicKey(metadata.PublicKey) : "";
+  const address = metadata.Address ? normalizeEthereumAddress(metadata.Address) : "";
 
-  if (!keyId) {
-    throw new Error("KMS CreateKey response did not include KeyMetadata.KeyId");
+  if (!keyId || !address) {
+    throw new Error("KMS CreateKey response must include KeyMetadata.KeyId and Address");
   }
 
   console.log(
@@ -28,7 +28,7 @@ async function main() {
       {
         alias,
         keyId,
-        publicKey: publicKey || null,
+        address,
       },
       null,
       2
@@ -36,14 +36,9 @@ async function main() {
   );
 
   console.log("\nAdd these server-side env values for the signer/verifier:");
-  console.log(`ZKWEATHER_KMS_KEY_ID=${keyId}`);
-  if (publicKey) {
-    console.log(`ZKWEATHER_PUBLIC_KEY=${publicKey}`);
-  } else {
-    console.log(
-      "ZKWEATHER_PUBLIC_KEY=<KMS public key was not returned; fetch key metadata and set it here>"
-    );
-  }
+  console.log("ZKWEATHER_SIGNATURE_SCHEME=ethereum_secp256k1_eip191");
+  console.log(`ZKWEATHER_ETHEREUM_KMS_KEY_ID=${keyId}`);
+  console.log(`ZKWEATHER_ETHEREUM_SIGNER_ADDRESS=${address}`);
 }
 
 main().catch((err) => {

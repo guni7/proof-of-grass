@@ -1,6 +1,10 @@
 const mqtt = require("mqtt");
 const Database = require("better-sqlite3");
 const crypto = require("crypto");
+const { loadDotEnv } = require("./orbitport-kms");
+const { ethers } = require("ethers");
+
+loadDotEnv();
 
 // Your MQTT broker
 const MQTT_URL = process.env.MQTT_URL || "mqtt://172.20.10.3:1883";
@@ -16,24 +20,26 @@ function parseCsv(value) {
 // Register your real ESP8266 here.
 // Do NOT trust public_key from incoming payload blindly.
 const DEFAULT_DEVICE_ID = "esp8266-daaa2c";
-const DEFAULT_PUBLIC_KEY =
-  "712651f450ba05b63898b99ef5f7ba45632e8e2527f7f715cd671ec4024cc51e";
+const DEFAULT_ETHEREUM_SIGNER_ADDRESS =
+  "0x70136c02C29229D5dA1cbC7706C59Cc7374bCC81";
 const DEFAULT_APPROVED_FIRMWARE_HASHES = [
   "7229c744050eabd1f968457de01911ee",
   "f7b62a2847d61cbbdf0cdd73bc0d15ac",
 ];
 
 const registeredDeviceId = process.env.ZKWEATHER_DEVICE_ID || DEFAULT_DEVICE_ID;
-const registeredPublicKey = (
-  process.env.ZKWEATHER_PUBLIC_KEY || DEFAULT_PUBLIC_KEY
-).toLowerCase();
+const registeredSignerAddress = ethers.utils.getAddress(
+  process.env.ZKWEATHER_ETHEREUM_SIGNER_ADDRESS ||
+    process.env.ZKWEATHER_SIGNER_ADDRESS ||
+    DEFAULT_ETHEREUM_SIGNER_ADDRESS
+);
 const approvedFirmwareHashes = parseCsv(
   process.env.ZKWEATHER_APPROVED_FIRMWARE_HASHES
 );
 
 const REGISTERED_DEVICES = {
   [registeredDeviceId]: {
-    publicKey: registeredPublicKey,
+    signerAddress: registeredSignerAddress,
     approvedFirmwareHashes: new Set(
       approvedFirmwareHashes.length
         ? approvedFirmwareHashes
@@ -97,16 +103,6 @@ const insertReading = db.prepare(`
   )
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
-
-function hexToBytes(hex) {
-  if (typeof hex !== "string" || hex.length % 2 !== 0) {
-    throw new Error("Invalid hex string");
-  }
-
-  return Uint8Array.from(
-    hex.match(/.{1,2}/g).map((byte) => parseInt(byte, 16))
-  );
-}
 
 function buildCanonicalMessage(reading) {
   return [
@@ -178,19 +174,20 @@ function validateReadingShape(reading) {
     return { ok: false, reason: "temperature outside expected range" };
   }
 
-  if (reading.signature_scheme !== "ed25519") {
+  if (reading.signature_scheme !== "ethereum_secp256k1_eip191") {
     return {
       ok: false,
       reason: `unsupported signature scheme: ${reading.signature_scheme}`,
     };
   }
 
-  if (!/^[0-9a-fA-F]{64}$/.test(reading.public_key)) {
-    return { ok: false, reason: "public_key must be 32 bytes hex" };
+  const signerAddress = reading.signer_address || reading.public_key;
+  if (typeof signerAddress !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(signerAddress)) {
+    return { ok: false, reason: "public_key must be the Ethereum signer address" };
   }
 
-  if (!/^[0-9a-fA-F]{128}$/.test(reading.signature)) {
-    return { ok: false, reason: "signature must be 64 bytes hex" };
+  if (!/^0x[0-9a-fA-F]{130}$/.test(reading.signature)) {
+    return { ok: false, reason: "signature must be 65 bytes hex" };
   }
 
   return { ok: true };
@@ -226,13 +223,6 @@ async function verifyReading(reading) {
     return { ok: false, reason: `Unknown device_id: ${reading.device_id}` };
   }
 
-  if (reading.public_key.toLowerCase() !== registered.publicKey) {
-    return {
-      ok: false,
-      reason: "Payload public_key does not match registered public key",
-    };
-  }
-
   if (!registered.approvedFirmwareHashes.has(reading.firmware_hash)) {
     return {
       ok: false,
@@ -242,21 +232,22 @@ async function verifyReading(reading) {
 
   const canonicalMessage = buildCanonicalMessage(reading);
 
-  const messageBytes = new TextEncoder().encode(canonicalMessage);
-  const signatureBytes = hexToBytes(reading.signature);
-  const publicKeyBytes = hexToBytes(registered.publicKey);
-
-  const ed = await import("@noble/ed25519");
-  const signatureOk = await ed.verifyAsync(
-    signatureBytes,
-    messageBytes,
-    publicKeyBytes
-  );
-
-  if (!signatureOk) {
+  const payloadAddress = ethers.utils.getAddress(reading.signer_address || reading.public_key);
+  if (payloadAddress !== registered.signerAddress) {
     return {
       ok: false,
-      reason: "Bad Ed25519 signature",
+      reason: "Payload public_key does not match registered signer address",
+    };
+  }
+
+  const recoveredAddress = ethers.utils.verifyMessage(
+    canonicalMessage,
+    reading.signature
+  );
+  if (ethers.utils.getAddress(recoveredAddress) !== registered.signerAddress) {
+    return {
+      ok: false,
+      reason: "Bad Ethereum signature",
       canonicalMessage,
     };
   }

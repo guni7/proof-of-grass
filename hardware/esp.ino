@@ -26,7 +26,8 @@ uint32_t nonce = 0;
 
 struct KmsSignature {
   bool ok;
-  String publicKeyHex;
+  String signatureScheme;
+  String signerAddress;
   String signatureHex;
   String error;
 };
@@ -145,6 +146,30 @@ bool isHexString(const String& value, unsigned int expectedLength) {
   return true;
 }
 
+bool isEthereumAddress(const String& value) {
+  if (value.length() != 42) return false;
+  if (value.charAt(0) != '0' || value.charAt(1) != 'x') return false;
+
+  for (unsigned int i = 2; i < value.length(); i++) {
+    char c = value.charAt(i);
+    bool isHex =
+      (c >= '0' && c <= '9') ||
+      (c >= 'a' && c <= 'f') ||
+      (c >= 'A' && c <= 'F');
+
+    if (!isHex) return false;
+  }
+
+  return true;
+}
+
+bool isEthereumSignature(const String& value) {
+  return value.length() == 132 &&
+         value.charAt(0) == '0' &&
+         value.charAt(1) == 'x' &&
+         isHexString(value.substring(2), 130);
+}
+
 KmsSignature requestKmsSignature(
   const String& deviceId,
   uint32_t nonce,
@@ -187,23 +212,27 @@ KmsSignature requestKmsSignature(
     return result;
   }
 
-  String publicKeyHex = extractJsonString(responseBody, "public_key");
+  String signerAddress = extractJsonString(responseBody, "signer_address");
+  if (signerAddress == "") {
+    signerAddress = extractJsonString(responseBody, "public_key");
+  }
+
   String signatureHex = extractJsonString(responseBody, "signature");
   String scheme = extractJsonString(responseBody, "signature_scheme");
   String signedCanonical = extractJsonString(responseBody, "canonical_message");
 
-  if (scheme != "ed25519") {
+  if (scheme != "ethereum_secp256k1_eip191") {
     result.error = "KMS signer returned unsupported signature scheme";
     return result;
   }
 
-  if (!isHexString(publicKeyHex, 64)) {
-    result.error = "KMS signer returned invalid public key";
+  if (!isEthereumAddress(signerAddress)) {
+    result.error = "KMS signer returned invalid Ethereum signer address";
     return result;
   }
 
-  if (!isHexString(signatureHex, 128)) {
-    result.error = "KMS signer returned invalid signature";
+  if (!isEthereumSignature(signatureHex)) {
+    result.error = "KMS signer returned invalid Ethereum signature";
     return result;
   }
 
@@ -213,7 +242,8 @@ KmsSignature requestKmsSignature(
   }
 
   result.ok = true;
-  result.publicKeyHex = publicKeyHex;
+  result.signatureScheme = scheme;
+  result.signerAddress = signerAddress;
   result.signatureHex = signatureHex;
   return result;
 }
@@ -235,7 +265,8 @@ String buildJsonPayload(
   int tempX10,
   int humidityX10,
   const String& firmwareHash,
-  const String& publicKeyHex,
+  const String& signatureScheme,
+  const String& signerAddress,
   const String& signature,
   const String& localIp
 ) {
@@ -246,8 +277,9 @@ String buildJsonPayload(
   json += "\"temperature_c_x10\":" + String(tempX10) + ",";
   json += "\"humidity_x10\":" + String(humidityX10) + ",";
   json += "\"firmware_hash\":\"" + firmwareHash + "\",";
-  json += "\"signature_scheme\":\"ed25519\",";
-  json += "\"public_key\":\"" + publicKeyHex + "\",";
+  json += "\"signature_scheme\":\"" + signatureScheme + "\",";
+  json += "\"public_key\":\"" + signerAddress + "\",";
+  json += "\"signer_address\":\"" + signerAddress + "\",";
   json += "\"signature\":\"" + signature + "\",";
   json += "\"local_ip\":\"" + localIp + "\"";
   json += "}";
@@ -366,7 +398,7 @@ void setup() {
 
   mqtt.setServer(mqtt_server, mqtt_port);
 
-  // JSON includes 64-byte signature as 128 hex chars, so give MQTT enough room.
+  // JSON includes an Ethereum 65-byte signature and signer address.
   mqtt.setBufferSize(1024);
 }
 
@@ -421,7 +453,7 @@ void loop() {
   );
 
   Serial.println();
-  Serial.println("Requesting KMS Ed25519 signature...");
+  Serial.println("Requesting KMS signature...");
   unsigned long signStart = millis();
   KmsSignature kmsSignature = requestKmsSignature(
     deviceId,
@@ -448,7 +480,8 @@ void loop() {
     tempX10,
     humidityX10,
     firmwareHash,
-    kmsSignature.publicKeyHex,
+    kmsSignature.signatureScheme,
+    kmsSignature.signerAddress,
     kmsSignature.signatureHex,
     localIp
   );
@@ -475,13 +508,16 @@ void loop() {
   Serial.print("Firmware hash: ");
   Serial.println(firmwareHash);
 
-  Serial.print("Public key: ");
-  Serial.println(kmsSignature.publicKeyHex);
+  Serial.print("Signature scheme: ");
+  Serial.println(kmsSignature.signatureScheme);
+
+  Serial.print("Signer identity: ");
+  Serial.println(kmsSignature.signerAddress);
 
   Serial.print("Canonical message: ");
   Serial.println(canonicalMessage);
 
-  Serial.print("Ed25519 signature: ");
+  Serial.print("Signature: ");
   Serial.println(kmsSignature.signatureHex);
 
   Serial.print("Signing took ms: ");

@@ -1,5 +1,8 @@
 const fs = require("fs");
 const path = require("path");
+const { ethers } = require("ethers");
+
+const SIGNATURE_SCHEME = "ethereum_secp256k1_eip191";
 
 let nextRpcId = 1;
 let cachedToken = null;
@@ -38,7 +41,7 @@ function loadDotEnv() {
 }
 
 function stripTrailingSlash(value) {
-  return value.replace(/\/+$/, "");
+  return String(value || "").replace(/\/+$/, "");
 }
 
 function resolveAuthUrl(env) {
@@ -68,7 +71,9 @@ function resolveRpcUrl(env, apiUrl) {
 }
 
 function readConfig(env = process.env) {
-  const apiUrl = stripTrailingSlash(env.OP_API_URL || env.ORBITPORT_API_URL || "https://op.spacecomputer.io");
+  const apiUrl = stripTrailingSlash(
+    env.OP_API_URL || env.ORBITPORT_API_URL || "https://op.spacecomputer.io"
+  );
 
   return {
     clientId: env.OP_CLIENT_ID || env.ORBITPORT_CLIENT_ID || "",
@@ -80,12 +85,11 @@ function readConfig(env = process.env) {
       "https://op.spacecomputer.io/api",
     apiUrl,
     rpcUrl: resolveRpcUrl(env, apiUrl),
-    keyId:
-      env.ZKWEATHER_KMS_KEY_ID ||
-      env.SPACEFABRIC_KMS_KEY_REF ||
-      env.ORBITPORT_KMS_KEY_ID ||
+    keyId: env.ZKWEATHER_ETHEREUM_KMS_KEY_ID || "",
+    signerAddress:
+      env.ZKWEATHER_ETHEREUM_SIGNER_ADDRESS ||
+      env.ZKWEATHER_SIGNER_ADDRESS ||
       "",
-    publicKey: env.ZKWEATHER_PUBLIC_KEY || env.ORBITPORT_KMS_PUBLIC_KEY || "",
     timeoutMs: Number(env.ORBITPORT_TIMEOUT_MS || 30000),
   };
 }
@@ -98,13 +102,15 @@ function requireCredentials(config) {
   }
 }
 
-function requireKeyConfig(config) {
+function requireEthereumKmsConfig(config) {
+  requireCredentials(config);
+
   if (!config.keyId) {
-    throw new Error("Missing ZKWEATHER_KMS_KEY_ID or SPACEFABRIC_KMS_KEY_REF");
+    throw new Error("Missing ZKWEATHER_ETHEREUM_KMS_KEY_ID");
   }
 
-  if (!config.publicKey) {
-    throw new Error("Missing ZKWEATHER_PUBLIC_KEY or ORBITPORT_KMS_PUBLIC_KEY");
+  if (!config.signerAddress) {
+    throw new Error("Missing ZKWEATHER_ETHEREUM_SIGNER_ADDRESS");
   }
 }
 
@@ -152,9 +158,8 @@ async function getAccessToken(config) {
     return cachedToken.value;
   }
 
-  const tokenUrl = `${config.authUrl}/oauth/token`;
   const body = await fetchJsonWithTimeout(
-    tokenUrl,
+    `${config.authUrl}/oauth/token`,
     {
       method: "POST",
       headers: {
@@ -231,85 +236,94 @@ async function jsonRpc(config, method, params) {
   return body.result;
 }
 
-function toBase64Utf8(value) {
-  return Buffer.from(value, "utf8").toString("base64");
+function normalizeEthereumAddress(value) {
+  try {
+    return ethers.utils.getAddress(String(value || "").trim());
+  } catch {
+    throw new Error("Ethereum signer address must be a 20-byte 0x address");
+  }
 }
 
-function normalizePublicKey(value) {
-  const trimmed = String(value || "").trim();
-  if (/^0x[0-9a-fA-F]{64}$/.test(trimmed)) {
-    return trimmed.slice(2).toLowerCase();
-  }
-  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
-    return trimmed.toLowerCase();
+function normalizeEthereumSignature(value) {
+  let trimmed = String(value || "").trim();
+  if (trimmed.startsWith("vault:v1:")) {
+    trimmed = trimmed.slice("vault:v1:".length);
   }
 
-  const decoded = Buffer.from(trimmed, "base64");
-  if (decoded.length === 32) {
-    return decoded.toString("hex");
+  let bytes;
+  if (/^0x[0-9a-fA-F]{130}$/.test(trimmed)) {
+    bytes = Buffer.from(trimmed.slice(2), "hex");
+  } else if (/^[0-9a-fA-F]{130}$/.test(trimmed)) {
+    bytes = Buffer.from(trimmed, "hex");
+  } else {
+    bytes = Buffer.from(trimmed, "base64");
   }
 
-  throw new Error("KMS public key must be 32 bytes as hex or base64");
+  if (bytes.length !== 65) {
+    throw new Error("Ethereum KMS signature must be 65 bytes as hex or base64");
+  }
+
+  const normalized = Buffer.from(bytes);
+  if (normalized[64] < 27) {
+    normalized[64] += 27;
+  }
+
+  return `0x${normalized.toString("hex")}`;
 }
 
-function normalizeSignature(value) {
-  const trimmed = String(value || "").trim();
-  if (/^0x[0-9a-fA-F]{128}$/.test(trimmed)) {
-    return trimmed.slice(2).toLowerCase();
-  }
-  if (/^[0-9a-fA-F]{128}$/.test(trimmed)) {
-    return trimmed.toLowerCase();
-  }
-
-  const decoded = Buffer.from(trimmed, "base64");
-  if (decoded.length === 64) {
-    return decoded.toString("hex");
-  }
-
-  throw new Error("KMS Ed25519 signature must be 64 bytes as hex or base64");
-}
-
-async function createEd25519Key(config, alias) {
+async function createEthereumKey(config, alias) {
   requireCredentials(config);
 
   return jsonRpc(config, "kms.CreateKey", {
     Alias: alias,
-    KeySpec: "ED25519",
+    Description: "ZK weather ESP8266 Ethereum signer",
+    KeySpec: "ECC_SECG_P256K1",
     KeyUsage: "SIGN_VERIFY",
-    Scheme: "TRANSIT",
+    Scheme: "ETHEREUM",
+    Tags: [],
   });
 }
 
-async function signEd25519Raw(config, message) {
-  requireCredentials(config);
-  requireKeyConfig(config);
+async function signCanonicalMessage(config, message) {
+  requireEthereumKmsConfig(config);
 
   const result = await jsonRpc(config, "kms.Sign", {
     KeyId: config.keyId,
-    Message: toBase64Utf8(message),
-    SigningAlgorithm: "ED25519",
-    MessageType: "RAW",
+    Message: message,
+    SigningAlgorithm: "ETHEREUM_SECP256K1",
+    MessageType: "EIP191",
   });
 
   if (!result || typeof result.Signature !== "string") {
     throw new Error("KMS Sign response did not include Signature");
   }
 
+  const signature = normalizeEthereumSignature(result.Signature);
+  const signerAddress = normalizeEthereumAddress(config.signerAddress);
+  const recovered = ethers.utils.verifyMessage(message, signature);
+  if (ethers.utils.getAddress(recovered) !== signerAddress) {
+    throw new Error(
+      `KMS signature recovered ${recovered}, expected ${signerAddress}`
+    );
+  }
+
   return {
     keyId: result.KeyId || config.keyId,
-    signatureHex: normalizeSignature(result.Signature),
-    publicKeyHex: normalizePublicKey(config.publicKey),
-    signingAlgorithm: result.SigningAlgorithm || "ED25519",
+    signatureScheme: SIGNATURE_SCHEME,
+    signature,
+    signerAddress,
+    signingAlgorithm: result.SigningAlgorithm || "ETHEREUM_SECP256K1",
   };
 }
 
 module.exports = {
-  createEd25519Key,
+  SIGNATURE_SCHEME,
+  createEthereumKey,
   getAccessToken,
   jsonRpc,
   loadDotEnv,
-  normalizePublicKey,
-  normalizeSignature,
+  normalizeEthereumAddress,
+  normalizeEthereumSignature,
   readConfig,
-  signEd25519Raw,
+  signCanonicalMessage,
 };
