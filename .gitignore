@@ -1,0 +1,37 @@
+# Node
+node_modules/
+npm-debug.log*
+pnpm-lock.yaml.bak
+
+# Noir / Barretenberg artifacts
+target/
+*.gz
+proof
+vk
+vk_hash
+public_inputs
+Prover.toml
+
+# Generated proofs / DB
+apps/zkweather-verifier/proofs/
+apps/zkweather-verifier/zkweather.db
+apps/zkweather-verifier/*.db
+apps/zkweather-verifier/*.db-shm
+apps/zkweather-verifier/*.db-wal
+
+# Armory verifier copied artifacts
+spacecomputer/armory-verifier/artifacts/
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+
+# Docker junk
+.docker/
+
+# Large generated docs/images if needed
+*.zip
