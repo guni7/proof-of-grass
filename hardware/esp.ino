@@ -16,7 +16,7 @@ const char* mqtt_server = "172.20.10.3";
 const int mqtt_port = 1883;
 
 // Local KMS signing proxy. It keeps Orbitport credentials off the ESP8266.
-const char* kms_signer_url = "http://172.20.10.3:3001/sign";
+const char* kms_signer_url = "http://172.20.10.3:3002/sign";
 
 WiFiClient espClient;
 PubSubClient mqtt(espClient);
